@@ -1,0 +1,48 @@
+﻿version: "3.9"
+
+services:
+  topo-postgres:
+    image: postgres:16
+    container_name: topo-postgres
+    restart: unless-stopped
+
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-topo}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+
+    volumes:
+      - topo-postgres-data:/var/lib/postgresql/data
+      - ../../db/postgres/schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
+      - ../../db/postgres/schema_v2.sql:/docker-entrypoint-initdb.d/002_schema_v2.sql:ro
+
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_buffers=2GB"
+      - "-c"
+      - "work_mem=32MB"
+      - "-c"
+      - "maintenance_work_mem=512MB"
+      - "-c"
+      - "effective_cache_size=5GB"
+      - "-c"
+      - "checkpoint_timeout=15min"
+      - "-c"
+      - "max_wal_size=4GB"
+      - "-c"
+      - "log_min_duration_statement=500"
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  topo-postgres-data:
