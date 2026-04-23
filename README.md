@@ -56,9 +56,9 @@ powershell -ExecutionPolicy Bypass -File .\restore_db.ps1
 - user: `postgres`
 - password: `postgres`
 
-## Если у другого человека ошибка `dump too short`
+## Если ошибка `dump too short`
 
-Это почти всегда означает, что он получил не настоящий файл дампа, а указатель `Git LFS`.
+Это почти всегда означает, что не получен настоящий файл дампа, а указатель `Git LFS`.
 
 Обычные причины:
 
@@ -94,21 +94,3 @@ with engine.connect() as conn:
     satellites = conn.execute(text("select count(*) from inventory_v2.satellite")).scalar()
     print(satellites)
 ```
-
-## Как залить на GitHub
-
-Файл дампа больше лимита обычного GitHub-файла, поэтому загружать его нужно через Git LFS. Через веб-интерфейс GitHub этот `.dump` не загрузится.
-
-Если репозиторий приватный, это нормально.
-
-Команды:
-
-```powershell
-git lfs install
-git add DBGIT\.gitattributes
-git add DBGIT
-git commit -m "Add PostgreSQL snapshot package"
-git push origin <branch-name>
-```
-
-Если `git-lfs` еще не установлен, установите его сначала. Альтернатива: хранить `.dump` не в `git`-истории, а как `GitHub Release asset`.
