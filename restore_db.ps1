@@ -21,6 +21,30 @@ if (-not (Test-Path $dumpPath)) {
     throw "Dump file not found: $dumpPath"
 }
 
+$dumpInfo = Get-Item $dumpPath
+$dumpHeaderBytes = Get-Content $dumpPath -Encoding Byte -TotalCount 5
+$dumpHeader = [System.Text.Encoding]::ASCII.GetString($dumpHeaderBytes)
+$firstTextLine = Get-Content $dumpPath -TotalCount 1 -ErrorAction SilentlyContinue
+
+if ($firstTextLine -like "version https://git-lfs.github.com/spec/v1*") {
+    throw @"
+Instead of a real dump file, the repository contains a Git LFS pointer.
+
+In the local repository clone, run:
+  git lfs install
+  git lfs pull
+
+Then check that the dump file is large, not just a few hundred bytes:
+  $dumpPath
+
+After that, run restore_db.ps1 again.
+"@
+}
+
+if ($dumpInfo.Length -lt 1024) {
+    throw "The dump file is suspiciously small: $($dumpInfo.Length) bytes. Most likely this is not the real database dump."
+}
+
 docker compose -f $composePath up -d
 if ($LASTEXITCODE -ne 0) {
     throw "Failed to start PostgreSQL container."
@@ -47,17 +71,25 @@ if ($LASTEXITCODE -ne 0) {
     throw "Failed to copy dump into container."
 }
 
-docker exec $ContainerName pg_restore `
-    -U $User `
-    -d $Database `
-    --clean `
-    --if-exists `
-    --no-owner `
-    --no-privileges `
-    $containerDump
+if ($dumpHeader -eq "PGDMP") {
+    docker exec $ContainerName pg_restore `
+        -U $User `
+        -d $Database `
+        --clean `
+        --if-exists `
+        --no-owner `
+        --no-privileges `
+        $containerDump
+}
+else {
+    docker exec $ContainerName psql `
+        -U $User `
+        -d $Database `
+        -f $containerDump
+}
 
 if ($LASTEXITCODE -ne 0) {
-    throw "pg_restore failed."
+    throw "Database restore failed."
 }
 
 Write-Host "Restore finished."
