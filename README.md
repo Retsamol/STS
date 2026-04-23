@@ -2,6 +2,8 @@
 
 Пакет для переноса и разворачивания PostgreSQL с заполненными схемами `inventory_v2` и `topo`.
 
+Приложена инструкция ## DB_GUIDE_RU.md
+
 ## Состав
 
 - `infra/postgres/docker-compose.yml`
