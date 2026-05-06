@@ -1,96 +1,131 @@
 param(
-    [string]$ComposeFile = "infra/postgres/docker-compose.yml",
-    [string]$DumpFile = "db/exports/inventory_v2_topo_2026-04-22_22-29-34.dump",
-    [string]$ContainerName = "topo-postgres",
-    [string]$Database = "topo",
-    [string]$User = "postgres",
-    [string]$Password = "postgres"
+    [switch]$ResetVolume,
+    [switch]$RestoreDump,
+    [string]$DumpPath = ""
 )
 
 $ErrorActionPreference = "Stop"
 
-$root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$composePath = Join-Path $root $ComposeFile
-$dumpPath = Join-Path $root $DumpFile
+$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ComposeFile = Join-Path $Root "infra\postgres\docker-compose.yml"
 
-if (-not (Test-Path $composePath)) {
-    throw "Compose file not found: $composePath"
-}
+function Invoke-DockerStep {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Args,
+        [Parameter(Mandatory = $true)]
+        [string]$Label
+    )
 
-if (-not (Test-Path $dumpPath)) {
-    throw "Dump file not found: $dumpPath"
-}
-
-$dumpInfo = Get-Item $dumpPath
-$dumpHeaderBytes = Get-Content $dumpPath -Encoding Byte -TotalCount 5
-$dumpHeader = [System.Text.Encoding]::ASCII.GetString($dumpHeaderBytes)
-$firstTextLine = Get-Content $dumpPath -TotalCount 1 -ErrorAction SilentlyContinue
-
-if ($firstTextLine -like "version https://git-lfs.github.com/spec/v1*") {
-    throw @"
-Instead of a real dump file, the repository contains a Git LFS pointer.
-
-In the local repository clone, run:
-  git lfs install
-  git lfs pull
-
-Then check that the dump file is large, not just a few hundred bytes:
-  $dumpPath
-
-After that, run restore_db.ps1 again.
-"@
-}
-
-if ($dumpInfo.Length -lt 1024) {
-    throw "The dump file is suspiciously small: $($dumpInfo.Length) bytes. Most likely this is not the real database dump."
-}
-
-docker compose -f $composePath up -d
-if ($LASTEXITCODE -ne 0) {
-    throw "Failed to start PostgreSQL container."
-}
-
-$ready = $false
-for ($i = 0; $i -lt 30; $i++) {
-    docker exec $ContainerName pg_isready -U $User -d $Database | Out-Null
-    if ($LASTEXITCODE -eq 0) {
-        $ready = $true
-        break
+    & docker @Args
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Label failed with exit code $LASTEXITCODE"
     }
-    Start-Sleep -Seconds 2
 }
 
-if (-not $ready) {
-    throw "PostgreSQL did not become ready in time."
+function Invoke-ComposeStep {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Args,
+        [Parameter(Mandatory = $true)]
+        [string]$Label
+    )
+
+    & docker compose -f $ComposeFile @Args
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Label failed with exit code $LASTEXITCODE"
+    }
 }
 
-$containerDump = "/tmp/" + [System.IO.Path]::GetFileName($dumpPath)
-
-docker cp $dumpPath "${ContainerName}:$containerDump"
-if ($LASTEXITCODE -ne 0) {
-    throw "Failed to copy dump into container."
+function Wait-Postgres {
+    for ($i = 0; $i -lt 60; $i++) {
+        & docker compose -f $ComposeFile exec -T topo-postgres pg_isready -U postgres -d topo | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            return
+        }
+        Start-Sleep -Seconds 2
+    }
+    throw "PostgreSQL did not become ready in time"
 }
 
-if ($dumpHeader -eq "PGDMP") {
-    docker exec $ContainerName pg_restore `
-        -U $User `
-        -d $Database `
-        --clean `
-        --if-exists `
-        --no-owner `
-        --no-privileges `
-        $containerDump
-}
-else {
-    docker exec $ContainerName psql `
-        -U $User `
-        -d $Database `
-        -f $containerDump
+function Apply-SqlFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RelativePath
+    )
+
+    $SqlPath = Join-Path $Root $RelativePath
+    if (-not (Test-Path $SqlPath)) {
+        throw "SQL file not found: $SqlPath"
+    }
+
+    Write-Host "Applying $RelativePath"
+    Get-Content -Raw -Encoding UTF8 $SqlPath | docker compose -f $ComposeFile exec -T topo-postgres psql -v ON_ERROR_STOP=1 -U postgres -d topo | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to apply $RelativePath"
+    }
 }
 
-if ($LASTEXITCODE -ne 0) {
-    throw "Database restore failed."
+function Resolve-DumpPath {
+    if ($DumpPath -ne "") {
+        $ExplicitPath = Join-Path $Root $DumpPath
+        if (-not (Test-Path $ExplicitPath)) {
+            throw "Dump file not found: $ExplicitPath"
+        }
+        return $ExplicitPath
+    }
+
+    $ExportsDir = Join-Path $Root "db\exports"
+    $LatestDump = Get-ChildItem $ExportsDir -Filter "*.dump" -File | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($null -eq $LatestDump) {
+        throw "No .dump file found in $ExportsDir"
+    }
+    return $LatestDump.FullName
 }
 
-Write-Host "Restore finished."
-Write-Host "PostgreSQL: postgresql://${User}:${Password}@127.0.0.1:5432/$Database"
+if (-not (Test-Path $ComposeFile)) {
+    throw "Docker Compose file not found: $ComposeFile"
+}
+
+if ($ResetVolume) {
+    Write-Host "Resetting PostgreSQL Docker volume"
+    Invoke-ComposeStep -Args @("down", "-v") -Label "docker compose down -v"
+}
+
+Write-Host "Starting PostgreSQL"
+Invoke-ComposeStep -Args @("up", "-d") -Label "docker compose up"
+Wait-Postgres
+
+if ($RestoreDump) {
+    $DumpFullPath = Resolve-DumpPath
+    $DumpItem = Get-Item $DumpFullPath
+    if ($DumpItem.Length -lt 1000000) {
+        throw "Dump file is too small. It is probably a Git LFS pointer, not the real dump: $DumpFullPath"
+    }
+
+    Write-Host "Restoring dump $($DumpItem.Name)"
+    Invoke-DockerStep -Args @("cp", $DumpFullPath, "topo-postgres:/tmp/topo_current.dump") -Label "docker cp dump"
+    Invoke-ComposeStep -Args @(
+        "exec",
+        "-T",
+        "topo-postgres",
+        "pg_restore",
+        "--clean",
+        "--if-exists",
+        "--no-owner",
+        "--no-privileges",
+        "-U",
+        "postgres",
+        "-d",
+        "topo",
+        "/tmp/topo_current.dump"
+    ) -Label "pg_restore"
+} else {
+    Apply-SqlFile "db\postgres\schema.sql"
+    Apply-SqlFile "db\postgres\schema_v2.sql"
+    Apply-SqlFile "db\postgres\explicit_scenario_schema.sql"
+    Apply-SqlFile "db\postgres\migrations\0003_topo_export_runtime_delta.sql"
+    Apply-SqlFile "db\postgres\migrations\0004_explicit_resource_limit_runtime_fields.sql"
+}
+
+Write-Host "Done"

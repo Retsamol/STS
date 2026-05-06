@@ -1,54 +1,72 @@
-# DBGIT
+# Hybrid Topology DB
 
-Пакет для переноса и разворачивания PostgreSQL с заполненными схемами `inventory_v2` и `topo`.
+Я собрал здесь отдельный пакет с базой для тех, кому нужно быстро развернуть у себя PostgreSQL со схемами и текущим снимком результатов расчета.
 
-Приложена инструкция `DB_GUIDE_RU.md`
+Это не весь расчетный проект. Здесь только то, что нужно для базы: SQL-схемы, миграции, docker-compose, дамп и скрипт восстановления.
 
-## Состав
+Подробное описание таблиц и того, где что искать, лежит в `DB_GUIDE_RU.md`.
+
+## Что внутри
 
 - `infra/postgres/docker-compose.yml`
 - `infra/postgres/.env.example`
 - `db/postgres/schema.sql`
 - `db/postgres/schema_v2.sql`
-- `db/exports/inventory_v2_topo_2026-04-22_22-29-34.dump`
+- `db/postgres/explicit_scenario_schema.sql`
+- `db/postgres/migrations/*.sql`
+- `db/exports/topo_current_2026-05-06.dump`
 - `restore_db.ps1`
 - `DB_GUIDE_RU.md`
 
-## Что важно знать заранее
+## Самое важное заранее
 
-Текущий файл `inventory_v2_topo_2026-04-22_22-29-34.dump` — это корректный дамп
+Файл `db/exports/topo_current_2026-05-06.dump` - это текущий дамп базы `topo`.
 
-- восстанавливать его нужно через `pg_restore`;
+Размер дампа сейчас примерно `1721737363` байт, то есть около 1.7 ГБ. Поэтому он должен храниться через Git LFS. Если после скачивания файл весит несколько сотен байт или пару килобайт, это не дамп, а LFS-указатель.
 
-## Быстрое восстановление
-
-1. Перейдите в папку.
-2. Убедитесь, что установлен Docker Desktop.
-3. Если репозиторий получен через `Git`, обязательно подтяните реальные файлы `Git LFS`:
+В таком случае сначала выполните:
 
 ```powershell
 git lfs install
 git lfs pull
 ```
 
-4. Проверьте размер файла `db/exports/inventory_v2_topo_2026-04-22_22-29-34.dump`.
+И только потом запускайте восстановление.
 
-Он должен быть большим, примерно `273764235` байт. Если файл весит несколько сотен байт или несколько килобайт, это не дамп, а указатель `Git LFS`.
+## Быстрое восстановление
 
-5. Запустите:
+1. Откройте папку с этим репозиторием.
+2. Убедитесь, что установлен и запущен Docker Desktop.
+3. Если репозиторий получен через GitHub Desktop или обычный Git, проверьте Git LFS:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\restore_db.ps1
+git lfs install
+git lfs pull
 ```
 
-Скрипт:
+4. Проверьте размер файла:
 
-- поднимет контейнер PostgreSQL;
-- дождется готовности базы;
-- скопирует дамп в контейнер;
-- восстановит данные в базу `topo`.
+```powershell
+Get-Item .\db\exports\topo_current_2026-05-06.dump
+```
 
-После восстановления можно подключаться к базе:
+5. Запустите восстановление:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\restore_db.ps1 -RestoreDump
+```
+
+Если нужно пересоздать локальный volume PostgreSQL с нуля:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\restore_db.ps1 -ResetVolume -RestoreDump
+```
+
+Скрипт поднимет контейнер PostgreSQL, дождется готовности базы, скопирует дамп внутрь контейнера и восстановит данные в базу `topo`.
+
+## Подключение
+
+После восстановления можно подключаться так:
 
 - host: `127.0.0.1`
 - port: `5432`
@@ -56,59 +74,41 @@ powershell -ExecutionPolicy Bypass -File .\restore_db.ps1
 - user: `postgres`
 - password: `postgres`
 
-## Если у другого человека ошибка `dump too short`
+## Если нужен только пустой каркас БД
 
-Это почти всегда означает, что он получил не настоящий файл дампа, а указатель `Git LFS`.
+Можно не восстанавливать дамп, а просто применить схемы:
 
-Обычные причины:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\restore_db.ps1
+```
 
-- репозиторий клонировали без `Git LFS`;
-- скачали архив репозитория вместо нормального клона;
-- скачали не сам объект, а текстовый файл-указатель.
+В этом режиме создаются схемы `topo`, `topo_v2`, `inventory`, `inventory_v2` и `inventory_explicit`, но без данных из дампа.
 
-Что делать:
+## Если возникает `dump too short`
+
+Почти всегда это значит, что на машине лежит не настоящий `.dump`, а Git LFS pointer.
+
+Проверьте размер файла. Если он маленький, выполните:
 
 ```powershell
 git lfs install
 git lfs pull
 ```
 
-Потом снова проверить размер файла и только после этого запускать восстановление.
+Потом еще раз проверьте размер и повторите восстановление.
 
-## SQL и Python
+## Как заливать на GitHub
 
-Пример SQL:
+Дамп большой, поэтому обычная загрузка через веб-интерфейс GitHub здесь не подходит. Нужен Git LFS.
 
-```sql
-select count(*) from inventory_v2.satellite;
-select count(*) from topo.edge;
-```
-
-Пример SQLAlchemy:
-
-```python
-from sqlalchemy import create_engine, text
-
-engine = create_engine("postgresql+psycopg://postgres:postgres@127.0.0.1:5432/topo")
-with engine.connect() as conn:
-    satellites = conn.execute(text("select count(*) from inventory_v2.satellite")).scalar()
-    print(satellites)
-```
-
-## Как залить на GitHub
-
-Файл дампа больше лимита обычного GitHub-файла, поэтому загружать его нужно через Git LFS. Через веб-интерфейс GitHub этот `.dump` не загрузится.
-
-Если репозиторий приватный, это нормально.
-
-Команды:
+Минимальный порядок такой:
 
 ```powershell
 git lfs install
-git add DBGIT\.gitattributes
-git add DBGIT
-git commit -m "Add PostgreSQL snapshot package"
-git push origin <branch-name>
+git add .gitattributes
+git add db infra README.md DB_GUIDE_RU.md restore_db.ps1
+git commit -m "Add PostgreSQL database package"
+git push
 ```
 
-Если `git-lfs` еще не установлен, установите его сначала. Альтернатива: хранить `.dump` не в `git`-истории, а как `GitHub Release asset`.
+Если GitHub начнет ругаться на лимиты LFS, дамп лучше вынести в GitHub Release asset, а в репозитории оставить схемы, скрипт восстановления и инструкцию.

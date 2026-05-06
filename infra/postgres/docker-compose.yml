@@ -1,5 +1,3 @@
-﻿version: "3.9"
-
 services:
   topo-postgres:
     image: postgres:16
@@ -23,17 +21,17 @@ services:
     command:
       - "postgres"
       - "-c"
-      - "shared_buffers=2GB"
+      - "shared_buffers=${POSTGRES_SHARED_BUFFERS:-512MB}"
       - "-c"
-      - "work_mem=32MB"
+      - "work_mem=${POSTGRES_WORK_MEM:-16MB}"
       - "-c"
-      - "maintenance_work_mem=512MB"
+      - "maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-128MB}"
       - "-c"
-      - "effective_cache_size=5GB"
+      - "effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-2GB}"
       - "-c"
       - "checkpoint_timeout=15min"
       - "-c"
-      - "max_wal_size=4GB"
+      - "max_wal_size=${POSTGRES_MAX_WAL_SIZE:-1GB}"
       - "-c"
       - "log_min_duration_statement=500"
 
