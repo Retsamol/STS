@@ -101,6 +101,7 @@ git lfs pull
 
 Дамп большой, поэтому обычная загрузка через веб-интерфейс GitHub здесь не подходит. Нужен Git LFS.
 
+<<<<<<< HEAD
 Минимальный порядок такой:
 
 ```powershell
@@ -112,3 +113,20 @@ git push
 ```
 
 Если GitHub начнет ругаться на лимиты LFS, дамп лучше вынести в GitHub Release asset, а в репозитории оставить схемы, скрипт восстановления и инструкцию.
+=======
+```sql
+select count(*) from inventory_v2.satellite;
+select count(*) from topo.edge;
+```
+
+Пример SQLAlchemy:
+
+```python
+from sqlalchemy import create_engine, text
+
+engine = create_engine("postgresql+psycopg://postgres:postgres@127.0.0.1:5432/topo")
+with engine.connect() as conn:
+    satellites = conn.execute(text("select count(*) from inventory_v2.satellite")).scalar()
+    print(satellites)
+```
+>>>>>>> 4c20c439c247dea4c76c7e7aed9ba94e99a64a5d
