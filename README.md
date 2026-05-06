@@ -74,9 +74,15 @@ powershell -ExecutionPolicy Bypass -File .\restore_db.ps1 -ResetVolume -RestoreD
 - user: `postgres`
 - password: `postgres`
 
+<<<<<<< HEAD
 ## Если нужен только пустой каркас БД
 
 Можно не восстанавливать дамп, а просто применить схемы:
+=======
+## Если ошибка `dump too short`
+
+Это почти всегда означает, что не получен настоящий файл дампа, а указатель `Git LFS`.
+>>>>>>> 4c20c439c247dea4c76c7e7aed9ba94e99a64a5d
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\restore_db.ps1
