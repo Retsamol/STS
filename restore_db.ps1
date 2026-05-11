@@ -83,6 +83,16 @@ function Resolve-DumpPath {
     return $LatestDump.FullName
 }
 
+function Resolve-SchemaPath {
+    $Schema = Get-ChildItem (Join-Path $Root "db") -Filter "topo_results_schema_*.sql" -File |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    if ($null -eq $Schema) {
+        throw "No topo schema SQL file found in db"
+    }
+    return $Schema.FullName
+}
+
 if (-not (Test-Path $ComposeFile)) {
     throw "Docker Compose file not found: $ComposeFile"
 }
@@ -104,7 +114,7 @@ if ($RestoreDump) {
     }
 
     Write-Host "Restoring dump $($DumpItem.Name)"
-    Invoke-DockerStep -Args @("cp", $DumpFullPath, "topo-postgres:/tmp/topo_current.dump") -Label "docker cp dump"
+    Invoke-DockerStep -Args @("cp", $DumpFullPath, "topo-postgres:/tmp/topo_results.dump") -Label "docker cp dump"
     Invoke-ComposeStep -Args @(
         "exec",
         "-T",
@@ -118,14 +128,12 @@ if ($RestoreDump) {
         "postgres",
         "-d",
         "topo",
-        "/tmp/topo_current.dump"
+        "/tmp/topo_results.dump"
     ) -Label "pg_restore"
 } else {
-    Apply-SqlFile "db\postgres\schema.sql"
-    Apply-SqlFile "db\postgres\schema_v2.sql"
-    Apply-SqlFile "db\postgres\explicit_scenario_schema.sql"
-    Apply-SqlFile "db\postgres\migrations\0003_topo_export_runtime_delta.sql"
-    Apply-SqlFile "db\postgres\migrations\0004_explicit_resource_limit_runtime_fields.sql"
+    $SchemaFullPath = Resolve-SchemaPath
+    $RelativeSchemaPath = $SchemaFullPath.Substring($Root.Length + 1)
+    Apply-SqlFile $RelativeSchemaPath
 }
 
 Write-Host "Done"

@@ -1,138 +1,83 @@
-# Hybrid Topology DB
+# Hybrid Topology Results
 
-Я собрал здесь отдельный пакет с базой для тех, кому нужно быстро развернуть у себя PostgreSQL со схемами и текущим снимком результатов расчета.
+Я собрал здесь отдельный пакет с результатами расчетов по построенным топологиям. Внутри лежит только схема `topo`: сами прогоны, узлы, координаты, связи, лучи, traffic results, очереди, распределение ресурсов, результаты радиобюджета и готовые JSON-снимки топологии.
 
-Это не весь расчетный проект. Здесь только то, что нужно для базы: SQL-схемы, миграции, docker-compose, дамп и скрипт восстановления.
+Этот пакет нужен для просмотра и анализа уже построенных топологий. Состав папки рассчитан на простое восстановление результатов в локальный PostgreSQL и работу с ними через SQL-клиент или собственные аналитические скрипты.
 
-Подробное описание таблиц и того, где что искать, лежит в `DB_GUIDE_RU.md`.
+Подробное описание того, какие таблицы читать и с чего начинать, находится в `DB_GUIDE_RU.md`.
 
-## Что внутри
+## Состав пакета
 
-- `infra/postgres/docker-compose.yml`
-- `infra/postgres/.env.example`
-- `db/postgres/schema.sql`
-- `db/postgres/schema_v2.sql`
-- `db/postgres/explicit_scenario_schema.sql`
-- `db/postgres/migrations/*.sql`
-- `db/exports/topo_current_2026-05-06.dump`
-- `restore_db.ps1`
-- `DB_GUIDE_RU.md`
+В папке `db` лежат SQL-структура текущей схемы `topo` и дамп с данными:
 
-## Самое важное заранее
+```text
+db/topo_results_schema_2026-05-11.sql
+db/exports/topo_results_2026-05-11.dump
+```
 
-Файл `db/exports/topo_current_2026-05-06.dump` - это текущий дамп базы `topo`.
+В папке `infra/postgres` лежит минимальный Docker Compose для локального PostgreSQL. Скрипт `restore_db.ps1` поднимает контейнер и восстанавливает дамп или, если нужно, создает пустую структуру `topo` без данных.
 
-Размер дампа сейчас примерно `1721737363` байт, то есть около 1.7 ГБ. Поэтому он должен храниться через Git LFS. Если после скачивания файл весит несколько сотен байт или пару килобайт, это не дамп, а LFS-указатель.
-
-В таком случае сначала выполните:
+Файл дампа большой: `1570929648` байт, примерно 1.57 ГБ. Он должен храниться через Git LFS. Если после скачивания `.dump` весит несколько сотен байт или пару килобайт, значит Git LFS не подтянул настоящий файл.
 
 ```powershell
 git lfs install
 git lfs pull
 ```
 
-И только потом запускайте восстановление.
+## Восстановление
 
-## Быстрое восстановление
-
-1. Откройте папку с этим репозиторием.
-2. Убедитесь, что установлен и запущен Docker Desktop.
-3. Если репозиторий получен через GitHub Desktop или обычный Git, проверьте Git LFS:
+Перед запуском нужен установленный и запущенный Docker Desktop. После клонирования репозитория сначала проверьте Git LFS, затем размер дампа:
 
 ```powershell
 git lfs install
 git lfs pull
+Get-Item .\db\exports\topo_results_2026-05-11.dump
 ```
 
-4. Проверьте размер файла:
-
-```powershell
-Get-Item .\db\exports\topo_current_2026-05-06.dump
-```
-
-5. Запустите восстановление:
+Для восстановления данных выполните:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\restore_db.ps1 -RestoreDump
 ```
 
-Если нужно пересоздать локальный volume PostgreSQL с нуля:
+Если нужно пересоздать локальный Docker volume PostgreSQL с нуля:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\restore_db.ps1 -ResetVolume -RestoreDump
 ```
 
-Скрипт поднимет контейнер PostgreSQL, дождется готовности базы, скопирует дамп внутрь контейнера и восстановит данные в базу `topo`.
+После восстановления база доступна с такими параметрами:
 
-## Подключение
+```text
+host: 127.0.0.1
+port: 5432
+database: topo
+user: postgres
+password: postgres
+```
 
-После восстановления можно подключаться так:
-
-- host: `127.0.0.1`
-- port: `5432`
-- database: `topo`
-- user: `postgres`
-- password: `postgres`
-
-<<<<<<< HEAD
-## Если нужен только пустой каркас БД
-
-Можно не восстанавливать дамп, а просто применить схемы:
-=======
-## Если ошибка `dump too short`
-
-Это почти всегда означает, что не получен настоящий файл дампа, а указатель `Git LFS`.
->>>>>>> 4c20c439c247dea4c76c7e7aed9ba94e99a64a5d
+Если нужны только таблицы без данных, можно запустить скрипт без `-RestoreDump`:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\restore_db.ps1
 ```
 
-В этом режиме создаются схемы `topo`, `topo_v2`, `inventory`, `inventory_v2` и `inventory_explicit`, но без данных из дампа.
+## Что смотреть в базе
 
-## Если возникает `dump too short`
+Начинать удобнее с `topo.simulation`: там лежит список прогонов и их `simulation_uuid`. После выбора нужного `simulation_uuid` уже можно смотреть узлы в `topo.node`, координаты в `topo.node_position`, связи в `topo.edge`, лучи в `topo.ray` и `topo.connected_ray`, готовые кадры в `topo.topology_snapshot`.
 
-Почти всегда это значит, что на машине лежит не настоящий `.dump`, а Git LFS pointer.
+Для результатов по трафику используются `topo.traffic_flow_result`, `topo.traffic_resource_allocation` и `topo.node_queue_state`. Для радиобюджета используется `topo.link_budget_result`.
 
-Проверьте размер файла. Если он маленький, выполните:
+## Загрузка в GitHub
 
-```powershell
-git lfs install
-git lfs pull
-```
-
-Потом еще раз проверьте размер и повторите восстановление.
-
-## Как заливать на GitHub
-
-Дамп большой, поэтому обычная загрузка через веб-интерфейс GitHub здесь не подходит. Нужен Git LFS.
-
-<<<<<<< HEAD
-Минимальный порядок такой:
+Дамп больше обычных лимитов GitHub, поэтому для него нужен Git LFS:
 
 ```powershell
 git lfs install
 git add .gitattributes
 git add db infra README.md DB_GUIDE_RU.md restore_db.ps1
-git commit -m "Add PostgreSQL database package"
+git commit -m "Add topo results dump"
 git push
 ```
 
-Если GitHub начнет ругаться на лимиты LFS, дамп лучше вынести в GitHub Release asset, а в репозитории оставить схемы, скрипт восстановления и инструкцию.
-=======
-```sql
-select count(*) from inventory_v2.satellite;
-select count(*) from topo.edge;
-```
-
-Пример SQLAlchemy:
-
-```python
-from sqlalchemy import create_engine, text
-
-engine = create_engine("postgresql+psycopg://postgres:postgres@127.0.0.1:5432/topo")
-with engine.connect() as conn:
-    satellites = conn.execute(text("select count(*) from inventory_v2.satellite")).scalar()
-    print(satellites)
-```
->>>>>>> 4c20c439c247dea4c76c7e7aed9ba94e99a64a5d
+Если LFS-лимиты в репозитории окажутся неудобными, сам `.dump` лучше положить в GitHub Release, а в репозитории оставить схему, скрипт восстановления и документацию.

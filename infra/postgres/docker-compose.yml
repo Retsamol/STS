@@ -15,8 +15,6 @@ services:
 
     volumes:
       - topo-postgres-data:/var/lib/postgresql/data
-      - ../../db/postgres/schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
-      - ../../db/postgres/schema_v2.sql:/docker-entrypoint-initdb.d/002_schema_v2.sql:ro
 
     command:
       - "postgres"
